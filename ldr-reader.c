@@ -32,7 +32,7 @@ struct ldr_t
 
 static struct ldr_t ldr =
 {
-   .gpio = -1;
+   .gpio = -1,
 };
 
 

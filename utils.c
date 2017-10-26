@@ -15,6 +15,8 @@
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <fcntl.h>
+#include <unistd.h>
+#include <sys/time.h>
 
 #include "utils.h"
 

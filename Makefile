@@ -2,7 +2,7 @@ ifneq ($(SRC),)
 VPATH=$(SRC)
 endif
 
-CFLAGS += -I. -I$(SRC) -Wall -std=c99 -D_BSD_SOURCE=1 -D_GNU_SOURCE=1
+CFLAGS += -I. -I$(SRC) -Wall -std=c99 -D_DEFAULT_SOURCE=1
 
 LIBS += -lrt
 

@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <errno.h>
+#include <string.h>
 
 #include "utils.h"
 #include "sysfsgpio.h"
@@ -111,7 +112,7 @@ int gpio_edge(int pin, int edge)
 		return(-1);
 	}
 
-	if (-1 == write(fd, &s_directions_str[s_edge_index], s_edge_length)) {
+	if (-1 == write(fd, &s_edge_str[s_edge_index], s_edge_length)) {
 		LOG_ERROR("Failed to set gpio edge!\n");
 		return(-1);
 	}
