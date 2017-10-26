@@ -65,19 +65,25 @@ int gpio_unexport(int pin)
 	return(0);
 }
 
-int gpio_direction(int pin, int dir)
+int gpio_open_direction(int pin)
 {
-	static const char s_directions_str[]  = "in\0out";
-
 	char path[MAX_PATH_BUFFER];
 	int fd;
 
 	snprintf(path, MAX_PATH_BUFFER, "/sys/class/gpio/gpio%d/direction", pin);
-	fd = open(path, O_WRONLY);
-	if (-1 == fd) {
-		LOG_ERROR("Failed to open gpio direction for writing!\n");
+	fd = open(path, O_RDWR);
+	if (-1 == fd)
+		LOG_ERROR("Failed to open gpio direction!\n");
+	return fd;
+}
+
+int gpio_direction(int pin, int dir)
+{
+	static const char s_directions_str[]  = "in\0out";
+
+	int fd = gpio_open_direction(pin);
+	if (fd == -1)
 		return(-1);
-	}
 
 	if (-1 == write(fd, &s_directions_str[GPIO_IN == dir ? 0 : 3], GPIO_IN == dir ? 2 : 3)) {
 		LOG_ERROR("Failed to set gpio direction!\n");
@@ -88,11 +94,22 @@ int gpio_direction(int pin, int dir)
 	return(0);
 }
 
+int gpio_open_edge(int pin)
+{
+	char path[MAX_PATH_BUFFER];
+	int fd;
+
+	snprintf(path, MAX_PATH_BUFFER, "/sys/class/gpio/gpio%d/edge", pin);
+	fd = open(path, O_RDWR);
+	if (-1 == fd)
+		LOG_ERROR("Failed to open gpio edge!\n");
+	return fd;
+}
+
 int gpio_edge(int pin, int edge)
 {
 	static const char s_edge_str[]  = "none\0rising\0falling\0both";
 
-	char path[MAX_PATH_BUFFER];
 	int fd;
 	int s_edge_index;
 	int s_edge_length;
@@ -105,12 +122,9 @@ int gpio_edge(int pin, int edge)
 		default:                s_edge_index = 0;  s_edge_length = 4;
 	}
 
-	snprintf(path, MAX_PATH_BUFFER, "/sys/class/gpio/gpio%d/edge", pin);
-	fd = open(path, O_WRONLY);
-	if (-1 == fd) {
-		LOG_ERROR("Failed to open gpio edge for writing!\n");
+	fd = gpio_open_edge(pin);
+	if (fd == -1)
 		return(-1);
-	}
 
 	if (-1 == write(fd, &s_edge_str[s_edge_index], s_edge_length)) {
 		LOG_ERROR("Failed to set gpio edge!\n");
@@ -121,19 +135,27 @@ int gpio_edge(int pin, int edge)
 	return(0);
 }
 
-int gpio_active_high_low(int pin, int active_high_low)
+int gpio_open_active_low(int pin)
 {
-	static const char s_invert_str[] = "01";
-
 	char path[MAX_PATH_BUFFER];
 	int fd;
 
 	snprintf(path, MAX_PATH_BUFFER, "/sys/class/gpio/gpio%d/active_low", pin);
-	fd = open(path, O_WRONLY);
-	if (-1 == fd) {
-		LOG_ERROR("Failed to open gpio active_low for writing!\n");
+	fd = open(path, O_RDWR);
+	if (-1 == fd)
+		LOG_ERROR("Failed to open gpio active_low!\n");
+	return fd;
+}
+
+int gpio_active_low(int pin, int active_high_low)
+{
+	static const char s_invert_str[] = "01";
+
+	int fd;
+
+	fd = gpio_open_active_low(pin);
+	if (fd == -1)
 		return(-1);
-	}
 
 	if (1 != write(fd, &s_invert_str[GPIO_ACTIVE_HIGH == active_high_low ? 0 : 1], 1)) {
 		LOG_ERROR("Failed to write gpio active_low!\n");
@@ -144,18 +166,26 @@ int gpio_active_high_low(int pin, int active_high_low)
 	return(0);
 }
 
-int gpio_read(int pin)
+int gpio_open_value(int pin)
 {
 	char path[MAX_PATH_BUFFER];
-	char value_str[3];
 	int fd;
 
 	snprintf(path, MAX_PATH_BUFFER, "/sys/class/gpio/gpio%d/value", pin);
-	fd = open(path, O_RDONLY);
-	if (-1 == fd) {
-		LOG_ERROR("Failed to open gpio value for reading!\n");
+	fd = open(path, O_RDWR);
+	if (-1 == fd)
+		LOG_ERROR("Failed to open gpio value!\n");
+	return fd;
+}
+
+int gpio_read(int pin)
+{
+	char value_str[3];
+	int fd;
+
+	fd = gpio_open_value(pin);
+	if (fd == -1)
 		return(-1);
-	}
 
 	if (-1 == read(fd, value_str, 3)) {
 		LOG_ERROR("Failed to read gpio value!\n");
@@ -171,15 +201,11 @@ int gpio_write(int pin, int value)
 {
 	static const char s_values_str[] = "01";
 
-	char path[MAX_PATH_BUFFER];
 	int fd;
 
-	snprintf(path, MAX_PATH_BUFFER, "/sys/class/gpio/gpio%d/value", pin);
-	fd = open(path, O_WRONLY);
-	if (-1 == fd) {
-		LOG_ERROR("Failed to open gpio value for writing!\n");
+	fd = gpio_open_value(pin);
+	if (fd == -1)
 		return(-1);
-	}
 
 	if (1 != write(fd, &s_values_str[GPIO_LOW == value ? 0 : 1], 1)) {
 		LOG_ERROR("Failed to write gpio value!\n");
@@ -195,20 +221,11 @@ int gpio_write(int pin, int value)
 // returns positive value if successful.
 // returns zero if timed out.
 // returns -1 if error.
-int gpio_wait_for_interrupt(int pin, int timeout_ms)
+int gpio_wait_for_interrupt_fd(int fd, int timeout_ms)
 {
-	char path[MAX_PATH_BUFFER];
 	char value_str[3];
 	struct pollfd pfd;
-	int fd;
 	int ret;
-
-	snprintf(path, MAX_PATH_BUFFER, "/sys/class/gpio/gpio%d/value", pin);
-	fd = open(path, O_RDONLY);
-	if (-1 == fd) {
-		LOG_ERROR("Failed to open gpio value for reading!\n");
-		return(-1);
-	}
 
 	pfd.fd = fd;
 	pfd.events = POLLPRI;
@@ -228,7 +245,31 @@ int gpio_wait_for_interrupt(int pin, int timeout_ms)
 	lseek(fd, 0, SEEK_SET);
 	read(fd, value_str, sizeof(value_str));
 
+	return ret;
+}
+
+int gpio_wait_for_interrupt(int pin, int timeout_ms)
+{
+	int fd;
+	int ret;
+
+	fd = gpio_open_value(pin);
+	if (fd == -1)
+		return(-1);
+
+	ret = gpio_wait_for_interrupt_fd(fd, timeout_ms);
+
 	close(fd);
 
 	return ret;
+}
+
+int gpio_write_string(int fd, const char *str, const char *filename)
+{
+	if (-1 == write(fd, str, strlen(str))) {
+		LOG_ERROR("Failed to set gpio %s!\n", filename);
+		return(-1);
+	}
+	fsync(fd);
+	return 0;
 }

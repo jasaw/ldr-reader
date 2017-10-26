@@ -36,12 +36,18 @@
 
 int gpio_export(int pin);
 int gpio_unexport(int pin);
+int gpio_open_direction(int pin);
 int gpio_direction(int pin, int dir);
+int gpio_open_edge(int pin);
 int gpio_edge(int pin, int edge);
-int gpio_active_high_low(int pin, int active_high_low);
+int gpio_open_active_low(int pin);
+int gpio_active_low(int pin, int active_high_low);
+int gpio_open_value(int pin);
 int gpio_read(int pin);
 int gpio_write(int pin, int value);
+int gpio_wait_for_interrupt_fd(int fd, int timeout_ms);
 int gpio_wait_for_interrupt(int pin, int timeout_ms);
+int gpio_write_string(int fd, const char *str, const char *filename);
 
 
 #endif // _SYSFSGPIO_H_

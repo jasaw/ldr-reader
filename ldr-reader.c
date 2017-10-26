@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include "utils.h"
 #include "sysfsgpio.h"
@@ -62,38 +63,60 @@ int main(int argc, char *argv[])
    signal(SIGINT, handle_terminate_signal);
    signal(SIGTERM, handle_terminate_signal);
 
-   ret |= gpio_export(ldr.gpio);
-
-
-
+   int fd_gpio_direction = -1;
+   int fd_gpio_edge = -1;
+   int fd_gpio_value = -1;
    int time_diff_ms;
    int poll_ret;
+   char *gpio_str;
+
+   ret |= gpio_export(ldr.gpio);
+   fd_gpio_direction = gpio_open_direction(ldr.gpio);
+   fd_gpio_edge = gpio_open_edge(ldr.gpio);
+   fd_gpio_value = gpio_open_value(ldr.gpio);
+   if ((ret != 0) ||
+       (fd_gpio_direction < 0) ||
+       (fd_gpio_edge < 0) ||
+       (fd_gpio_value < 0))
+      goto clean_up;
+
+
    while (!terminate) {
       // drain capacitor
-      //udelay(100000);
-      ret |= gpio_direction(ldr.gpio, GPIO_OUT);
-      //udelay(100000);
-      ret |= gpio_write(ldr.gpio, GPIO_LOW);
+      gpio_str = "out\n";
+      ret |= gpio_write_string(fd_gpio_direction, gpio_str, "direction");
+      gpio_str = "0\n";
+      ret |= gpio_write_string(fd_gpio_value, gpio_str, "value");
       udelay(100000);
       // change to input to let capacitor charge
-      ret |= gpio_direction(ldr.gpio, GPIO_IN);
-      ret |= gpio_edge(ldr.gpio, GPIO_EDGE_RISING);
+      gpio_str = "in\n";
+      ret |= gpio_write_string(fd_gpio_direction, gpio_str, "direction");
+      gpio_str = "rising\n";
+      ret |= gpio_write_string(fd_gpio_edge, gpio_str, "edge");
       if (ret != 0)
          break;
-
+      // time the interrupt
       clock_gettime(CLOCK_MONOTONIC, &start_time);
-      poll_ret = gpio_wait_for_interrupt(ldr.gpio, 3000);
+      poll_ret = gpio_wait_for_interrupt_fd(fd_gpio_value, 3000);
       clock_gettime(CLOCK_MONOTONIC, &now);
       if (poll_ret >= 0) {
          time_diff_ms = (now.tv_sec - start_time.tv_sec) * 1000 + (now.tv_nsec - start_time.tv_nsec) / 1000000;
          LOG_VERBOSE("%d ms\n", time_diff_ms);
       }
-      ret |= gpio_edge(ldr.gpio, GPIO_EDGE_NONE);
+      // reset the edge back to none
+      gpio_str = "none\n";
+      ret |= gpio_write_string(fd_gpio_edge, gpio_str, "edge");
    }
 
 
 
 clean_up:
+   if (fd_gpio_direction >= 0)
+      close(fd_gpio_direction);
+   if (fd_gpio_edge >= 0)
+      close(fd_gpio_edge);
+   if (fd_gpio_value >= 0)
+      close(fd_gpio_value);
    gpio_unexport(ldr.gpio);
 
    exit(0);
