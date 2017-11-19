@@ -25,6 +25,8 @@ log_level_t _log_level = LOG_INFO;
 
 void set_log_level(log_level_t new_log_level)
 {
+    if (new_log_level > LOG_DEBUG)
+        new_log_level = LOG_DEBUG;
     _log_level = new_log_level;
 }
 
