@@ -133,25 +133,20 @@ int ldr_read_once(struct ldr_sensor_t *ldr)
     struct timespec now;
     int time_diff_ms;
     int poll_ret;
-    const char *gpio_str;
     int ret = 0;
 
     // drain capacitor
-    gpio_str = "out\n";
-    ret |= gpio_write_string(ldr->fd_gpio_direction, gpio_str, "direction");
-    gpio_str = "0\n";
-    ret |= gpio_write_string(ldr->fd_gpio_value, gpio_str, "value");
+    ret |= gpio_write_string(ldr->fd_gpio_direction, "out\n", "direction");
+    ret |= gpio_write_string(ldr->fd_gpio_value, "0\n", "value");
     udelay(100000);
     // change to input to let capacitor charge
-    gpio_str = "in\n";
-    ret |= gpio_write_string(ldr->fd_gpio_direction, gpio_str, "direction");
-    gpio_str = "rising\n";
-    ret |= gpio_write_string(ldr->fd_gpio_edge, gpio_str, "edge");
+    ret |= gpio_write_string(ldr->fd_gpio_direction, "in\n", "direction");
+    ret |= gpio_write_string(ldr->fd_gpio_edge, "rising\n", "edge");
     if (ret != 0)
         return ret;
     // time the interrupt
     clock_gettime(CLOCK_MONOTONIC, &start_time);
-    poll_ret = gpio_wait_for_interrupt_fd(ldr->fd_gpio_value, 3000);
+    poll_ret = gpio_wait_for_interrupt_fd(ldr->fd_gpio_value, 1000);
     clock_gettime(CLOCK_MONOTONIC, &now);
     if (poll_ret >= 0) {
         time_diff_ms = (now.tv_sec - start_time.tv_sec) * 1000 + (now.tv_nsec - start_time.tv_nsec) / 1000000;
@@ -159,8 +154,7 @@ int ldr_read_once(struct ldr_sensor_t *ldr)
         LOG_VERBOSE("%d ms, avg %d ms\n", time_diff_ms, ldr->running_avg);
     }
     // reset the edge back to none
-    gpio_str = "none\n";
-    ret |= gpio_write_string(ldr->fd_gpio_edge, gpio_str, "edge");
+    ret |= gpio_write_string(ldr->fd_gpio_edge, "none\n", "edge");
 
     return ret;
 }
