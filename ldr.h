@@ -41,6 +41,7 @@ struct ldr_sensor_t
     unsigned int *buf;
     unsigned int running_total;
     unsigned int running_avg;
+
     ldr_state_t state;
     unsigned int high_threshold;
     unsigned int low_threshold;

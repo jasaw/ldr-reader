@@ -123,6 +123,8 @@ static void ldr_update_running_average(struct ldr_sensor_t *ldr,
             ldr->state = LDR_BRIGHT;
         else
             ldr->state = LDR_DARK;
+        if (ldr->trigger_cb)
+            ldr->trigger_cb(ldr->priv_data, ldr->state);
     }
 }
 

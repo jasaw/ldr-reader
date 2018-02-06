@@ -16,11 +16,11 @@
  */
 
 #include <stdlib.h>
-//#include <time.h>
 #include <signal.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <string.h>
+#include <wordexp.h>
 
 #include "utils.h"
 #include "list.h"
@@ -28,8 +28,8 @@
 #include "ldr.h"
 
 
-#define DEFAULT_AVERAGE_BUFFER_SIZE     128
-#define DEFAULT_HIGH_THRESHOLD          180
+#define DEFAULT_AVERAGE_BUFFER_SIZE     64
+#define DEFAULT_HIGH_THRESHOLD          150
 #define DEFAULT_LOW_THRESHOLD           30
 
 
@@ -44,13 +44,22 @@ struct output_gpio_t
 };
 
 
+struct trigger_action_t
+{
+    struct list_head gpio_list_head;
+    const char *cmd_bright;
+    const char *cmd_dark;
+    wordexp_t cmd_bright_exp_result;
+    wordexp_t cmd_dark_exp_result;
+};
+
+
+
 static const unsigned char usable_gpio_pins[] =
 {
     2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,32,40
 };
 static unsigned char terminate = 0;
-
-
 
 
 static int append_output_gpio(struct list_head *gpio_list_head, int gpio, unsigned char inverted)
@@ -124,6 +133,27 @@ static int gpio_in_list(struct list_head *gpio_list_head, int gpio)
 }
 
 
+static void trigger_action_cleanup(struct trigger_action_t *action)
+{
+    remove_all_output_gpio(&(action->gpio_list_head));
+    if (action->cmd_bright) {
+        wordfree(&(action->cmd_bright_exp_result));
+        action->cmd_bright = NULL;
+    }
+    if (action->cmd_dark) {
+        wordfree(&(action->cmd_dark_exp_result));
+        action->cmd_dark = NULL;
+    }
+}
+
+
+static void trigger_action_init(struct trigger_action_t *action)
+{
+    memset(action, 0, sizeof(struct trigger_action_t));
+    INIT_LIST_HEAD(&(action->gpio_list_head));
+}
+
+
 static void handle_terminate_signal(int sig)
 {
     if ((sig == SIGTERM) || (sig == SIGINT))
@@ -133,8 +163,53 @@ static void handle_terminate_signal(int sig)
 
 static void ldr_trigger_cb(void *priv_data, ldr_state_t new_state)
 {
+    struct trigger_action_t *action = (struct trigger_action_t *)priv_data;
+    struct output_gpio_t *output_gpio = NULL;
+    struct list_head *entry;
+    int ret = 0;
+    const char *gpio_str;
+
     LOG_INFO("LDR state: %d\n", new_state);
 
+    if (new_state == LDR_DARK)
+        gpio_str = "0\n";
+    else
+        gpio_str = "1\n";
+
+    list_for_each(entry, &(action->gpio_list_head)) {
+        list_entry(entry, struct output_gpio_t, list, output_gpio);
+        ret |= gpio_write_string(output_gpio->fd_gpio_value, gpio_str, "value");
+    }
+
+    if (new_state == LDR_DARK) {
+        if (action->cmd_dark) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                // This is the child process.  Execute the command.
+                execv(action->cmd_dark_exp_result.we_wordv[0], action->cmd_dark_exp_result.we_wordv);
+                exit(EXIT_FAILURE);
+            } else if (pid < 0) {
+                // The fork failed
+                LOG_ERROR("Error: fork failed: %s\n", action->cmd_dark);
+            } else {
+                // This is the parent process, do nothing.  */
+            }
+        }
+    } else {
+        if (action->cmd_bright) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                // This is the child process.  Execute the command.
+                execv(action->cmd_bright_exp_result.we_wordv[0], action->cmd_bright_exp_result.we_wordv);
+                exit(EXIT_FAILURE);
+            } else if (pid < 0) {
+                // The fork failed
+                LOG_ERROR("Error: fork failed: %s\n", action->cmd_bright);
+            } else {
+                // This is the parent process, do nothing.  */
+            }
+        }
+    }
 }
 
 
@@ -152,6 +227,8 @@ static void syntax(const char *progname)
     fprintf(stderr, " -H [threshold]  High threshold in milliseconds (when dark). Default %d\n", DEFAULT_HIGH_THRESHOLD);
     fprintf(stderr, " -L [threshold]  Low threshold in milliseconds (when bright). Default %d\n", DEFAULT_LOW_THRESHOLD);
     fprintf(stderr, " -n [size]       Average over n number of samples. Default %d samples\n", DEFAULT_AVERAGE_BUFFER_SIZE);
+    fprintf(stderr, " -x [command]    Command to run when dark\n");
+    fprintf(stderr, " -X [command]    Command to run when bright\n");
     fprintf(stderr, " -d              Daemonize\n");
     fprintf(stderr, " -v              Increase verbose mode (can set multiple times)\n");
     fprintf(stderr, " -h              Display this help page\n");
@@ -165,22 +242,22 @@ int main(int argc, char *argv[])
     const char *progname = "";
     log_level_t new_log_level = LOG_INFO;
     unsigned char daemonize = 0;
-    //unsigned char found_exec = 0;
     struct ldr_sensor_t ldr;
     int ldr_gpio = -1;
     int buf_size = DEFAULT_AVERAGE_BUFFER_SIZE;
     unsigned int high_threshold = DEFAULT_HIGH_THRESHOLD;
     unsigned int low_threshold = DEFAULT_LOW_THRESHOLD;
-    LIST_HEAD(output_gpio_list_head);
+    struct trigger_action_t action;
     int opt;
     int ret = 0;
     int i;
     char *gpio_str;
 
+    trigger_action_init(&action);
 
     progname = argv[0];
 
-    while (((opt = getopt(argc, argv, "g:G:H:L:n:dvh")) != -1))
+    while (((opt = getopt(argc, argv, "g:G:H:L:n:x:X:dvh")) != -1))
     {
         switch (opt)
         {
@@ -218,14 +295,14 @@ int main(int argc, char *argv[])
                         LOG_ERROR("Error: Invalid output GPIO pin %d\n", output_gpio);
                         exit(EXIT_FAILURE);
                     }
-                    if (gpio_in_list(&output_gpio_list_head, output_gpio)) {
+                    if (gpio_in_list(&action.gpio_list_head, output_gpio)) {
                         LOG_ERROR("Error: output GPIO pin %d already specified\n", output_gpio);
                         exit(EXIT_FAILURE);
                     }
                     if (inverted)
                         LOG_VERBOSE("Output GPIO pin %d is inverted\n", output_gpio);
                     LOG_VERBOSE("Adding output GPIO pin %d to list\n", output_gpio);
-                    if (append_output_gpio(&output_gpio_list_head, output_gpio, inverted)) {
+                    if (append_output_gpio(&action.gpio_list_head, output_gpio, inverted)) {
                         LOG_ERROR("Error: Unable to add output GPIO pin %d to list\n", output_gpio);
                         exit(EXIT_FAILURE);
                     }
@@ -249,19 +326,64 @@ int main(int argc, char *argv[])
                 break;
 
             case 'n':
-            {
-                int new_buf_size = atoi(optarg);
-                if (new_buf_size <= 0) {
-                    LOG_ERROR("Error: Invalid buffer size %d\n", new_buf_size);
-                    exit(EXIT_FAILURE);
+                {
+                    int new_buf_size = atoi(optarg);
+                    if (new_buf_size <= 0) {
+                        LOG_ERROR("Error: Invalid buffer size %d\n", new_buf_size);
+                        exit(EXIT_FAILURE);
+                    }
+                    buf_size = new_buf_size;
                 }
-                buf_size = new_buf_size;
-            }
-            break;
+                break;
 
-            //case 'x': found_exec = 1; break;
+            case 'x':
+                action.cmd_dark = optarg;
+                switch (wordexp(action.cmd_dark, &action.cmd_dark_exp_result, WRDE_NOCMD))
+                {
+                    case 0:
+                        break;
+                    case WRDE_BADCHAR:
+                        LOG_ERROR("Error: bad char: %s\n", action.cmd_dark);
+                        exit(EXIT_FAILURE);
+                    case WRDE_CMDSUB:
+                        LOG_ERROR("Error: command substitution not allowed: %s\n", action.cmd_dark);
+                        exit(EXIT_FAILURE);
+                    case WRDE_NOSPACE:
+                        LOG_ERROR("Error: failed to allocate memory: %s\n", action.cmd_dark);
+                        exit(EXIT_FAILURE);
+                    case WRDE_SYNTAX:
+                        LOG_ERROR("Error: syntax error: %s\n", action.cmd_dark);
+                        exit(EXIT_FAILURE);
+                    default:
+                        LOG_ERROR("Error: unknown error: %s\n", action.cmd_dark);
+                        exit(EXIT_FAILURE);
+                }
+                break;
+            case 'X':
+                action.cmd_bright = optarg;
+                switch (wordexp(action.cmd_bright, &action.cmd_bright_exp_result, WRDE_NOCMD))
+                {
+                    case 0:
+                        break;
+                    case WRDE_BADCHAR:
+                        LOG_ERROR("Error: bad char: %s\n", action.cmd_bright);
+                        exit(EXIT_FAILURE);
+                    case WRDE_CMDSUB:
+                        LOG_ERROR("Error: command substitution not allowed: %s\n", action.cmd_bright);
+                        exit(EXIT_FAILURE);
+                    case WRDE_NOSPACE:
+                        LOG_ERROR("Error: failed to allocate memory: %s\n", action.cmd_bright);
+                        exit(EXIT_FAILURE);
+                    case WRDE_SYNTAX:
+                        LOG_ERROR("Error: syntax error: %s\n", action.cmd_bright);
+                        exit(EXIT_FAILURE);
+                    default:
+                        LOG_ERROR("Error: unknown error: %s\n", action.cmd_bright);
+                        exit(EXIT_FAILURE);
+                }
+                break;
             case 'd': daemonize = 1; break;
-            case 'v': new_log_level++; break;
+            case 'v': new_log_level++; set_log_level(new_log_level); break;
             case 'h': // fall through
             default:
                 syntax(progname);
@@ -276,14 +398,11 @@ int main(int argc, char *argv[])
     }
 
 
-
-    set_log_level(new_log_level);
-
     if (ldr_gpio < 0) {
         LOG_ERROR("Error: LDR GPIO pin not specified\n");
         exit(EXIT_FAILURE);
     }
-    if (gpio_in_list(&output_gpio_list_head, ldr_gpio)) {
+    if (gpio_in_list(&action.gpio_list_head, ldr_gpio)) {
         LOG_ERROR("Error: LDR GPIO pin %d is used as output\n", ldr_gpio);
         exit(EXIT_FAILURE);
     }
@@ -291,6 +410,34 @@ int main(int argc, char *argv[])
     if (high_threshold <= low_threshold) {
         LOG_ERROR("Error: high threshold must be greater than low threshold\n");
         exit(EXIT_FAILURE);
+    }
+
+
+    if (daemonize)
+    {
+        pid_t pid, sid;
+        pid = fork();
+        if (pid < 0)
+        {
+            LOG_ERROR("Error: fork failed\n");
+            exit(EXIT_FAILURE);
+        }
+        // If we got a good PID, then we can exit the parent process.
+        if (pid > 0)
+            exit(EXIT_SUCCESS);
+
+        // we are now in child process
+
+        // Change the file mode mask
+        //umask(0);
+
+        // Create a new SID for the child process
+        sid = setsid();
+        if (sid < 0)
+        {
+            LOG_ERROR("Error: set SID failed\n");
+            exit(EXIT_FAILURE);
+        }
     }
 
 
@@ -303,10 +450,10 @@ int main(int argc, char *argv[])
         goto clean_up;
     }
 
-    ldr_register_callback(&ldr, ldr_trigger_cb, NULL);
+    ldr_register_callback(&ldr, ldr_trigger_cb, &action);
 
     // init output GPIO pins
-    if (init_all_output_gpio(&output_gpio_list_head)) {
+    if (init_all_output_gpio(&action.gpio_list_head)) {
         LOG_ERROR("Error: Failed to initialize output GPIO pins\n");
         ret = -1;
         goto clean_up;
@@ -320,7 +467,7 @@ int main(int argc, char *argv[])
 
 
 clean_up:
-    remove_all_output_gpio(&output_gpio_list_head);
+    trigger_action_cleanup(&action);
     ldr_cleanup(&ldr);
 
     exit(ret);
