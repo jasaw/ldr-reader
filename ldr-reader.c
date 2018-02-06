@@ -28,12 +28,6 @@
 #include "ldr.h"
 
 
-#define DEFAULT_AVERAGE_BUFFER_SIZE     64
-#define DEFAULT_HIGH_THRESHOLD          150
-#define DEFAULT_LOW_THRESHOLD           30
-
-
-
 
 struct output_gpio_t
 {
@@ -224,12 +218,13 @@ static void syntax(const char *progname)
     fprintf(stderr, " -G [gpiopin]    Light change event output GPIO pin number. High when bright.\n");
     fprintf(stderr, "                 Add 'i' to invert output. Can be set multiple times.\n");
     fprintf(stderr, "                 Example: 18 or 18i.\n");
-    fprintf(stderr, " -H [threshold]  High threshold in milliseconds (when dark). Default %d\n", DEFAULT_HIGH_THRESHOLD);
-    fprintf(stderr, " -L [threshold]  Low threshold in milliseconds (when bright). Default %d\n", DEFAULT_LOW_THRESHOLD);
-    fprintf(stderr, " -n [size]       Average over n number of samples. Default %d samples\n", DEFAULT_AVERAGE_BUFFER_SIZE);
-    fprintf(stderr, " -x [command]    Command to run when dark\n");
-    fprintf(stderr, " -X [command]    Command to run when bright\n");
-    fprintf(stderr, " -d              Daemonize\n");
+    fprintf(stderr, " -H [threshold]  High threshold in milliseconds (when dark). Default %d\n", LDR_DEFAULT_HIGH_THRESHOLD);
+    fprintf(stderr, " -L [threshold]  Low threshold in milliseconds (when bright). Default %d\n", LDR_DEFAULT_LOW_THRESHOLD);
+    fprintf(stderr, " -D [duration]   High threshold debounce duration in seconds. Default %d\n", LDR_DEFAULT_HIGH_DURATION_MS/1000);
+    fprintf(stderr, " -d [duration]   Low threshold debounce duration in seconds. Default %d\n", LDR_DEFAULT_LOW_DURATION_MS/1000);
+    fprintf(stderr, " -X [command]    Command to run when dark\n");
+    fprintf(stderr, " -x [command]    Command to run when bright\n");
+    fprintf(stderr, " -b              Run in the background\n");
     fprintf(stderr, " -v              Increase verbose mode (can set multiple times)\n");
     fprintf(stderr, " -h              Display this help page\n");
     fprintf(stderr, "\n");
@@ -244,9 +239,12 @@ int main(int argc, char *argv[])
     unsigned char daemonize = 0;
     struct ldr_sensor_t ldr;
     int ldr_gpio = -1;
-    int buf_size = DEFAULT_AVERAGE_BUFFER_SIZE;
-    unsigned int high_threshold = DEFAULT_HIGH_THRESHOLD;
-    unsigned int low_threshold = DEFAULT_LOW_THRESHOLD;
+    unsigned int high_threshold = LDR_DEFAULT_HIGH_THRESHOLD;
+    unsigned int low_threshold = LDR_DEFAULT_LOW_THRESHOLD;
+    unsigned int complete_darkness_threshold = LDR_DEFAULT_COMPLETE_DARKNESS_THRESHOLD;
+    unsigned int high_threshold_duration_ms = LDR_DEFAULT_HIGH_DURATION_MS;
+    unsigned int low_threshold_duration_ms = LDR_DEFAULT_LOW_DURATION_MS;
+    unsigned int complete_darkness_duration_ms = LDR_DEFAULT_COMPLETE_DARKNESS_DURATION_MS;
     struct trigger_action_t action;
     int opt;
     int ret = 0;
@@ -257,7 +255,7 @@ int main(int argc, char *argv[])
 
     progname = argv[0];
 
-    while (((opt = getopt(argc, argv, "g:G:H:L:n:x:X:dvh")) != -1))
+    while (((opt = getopt(argc, argv, "g:G:H:L:D:d:n:x:X:bvh")) != -1))
     {
         switch (opt)
         {
@@ -325,18 +323,25 @@ int main(int argc, char *argv[])
                 }
                 break;
 
-            case 'n':
-                {
-                    int new_buf_size = atoi(optarg);
-                    if (new_buf_size <= 0) {
-                        LOG_ERROR("Error: Invalid buffer size %d\n", new_buf_size);
-                        exit(EXIT_FAILURE);
-                    }
-                    buf_size = new_buf_size;
+            case 'D':
+                high_threshold_duration_ms = atoi(optarg);
+                if (high_threshold_duration_ms < 0) {
+                    LOG_ERROR("Error: Invalid high threshold debounce duration %d\n", high_threshold_duration_ms);
+                    exit(EXIT_FAILURE);
                 }
+                high_threshold_duration_ms = high_threshold_duration_ms * 1000;
                 break;
 
-            case 'x':
+            case 'd':
+                low_threshold_duration_ms = atoi(optarg);
+                if (low_threshold_duration_ms < 0) {
+                    LOG_ERROR("Error: Invalid low threshold debounce duration %d\n", low_threshold_duration_ms);
+                    exit(EXIT_FAILURE);
+                }
+                low_threshold_duration_ms = low_threshold_duration_ms * 1000;
+                break;
+
+            case 'X':
                 action.cmd_dark = optarg;
                 switch (wordexp(action.cmd_dark, &action.cmd_dark_exp_result, WRDE_NOCMD))
                 {
@@ -359,7 +364,7 @@ int main(int argc, char *argv[])
                         exit(EXIT_FAILURE);
                 }
                 break;
-            case 'X':
+            case 'x':
                 action.cmd_bright = optarg;
                 switch (wordexp(action.cmd_bright, &action.cmd_bright_exp_result, WRDE_NOCMD))
                 {
@@ -382,7 +387,7 @@ int main(int argc, char *argv[])
                         exit(EXIT_FAILURE);
                 }
                 break;
-            case 'd': daemonize = 1; break;
+            case 'b': daemonize = 1; break;
             case 'v': new_log_level++; set_log_level(new_log_level); break;
             case 'h': // fall through
             default:
@@ -409,6 +414,10 @@ int main(int argc, char *argv[])
 
     if (high_threshold <= low_threshold) {
         LOG_ERROR("Error: high threshold must be greater than low threshold\n");
+        exit(EXIT_FAILURE);
+    }
+    if (complete_darkness_threshold <= high_threshold) {
+        LOG_ERROR("Error: complete darkness threshold must be greater than high threshold\n");
         exit(EXIT_FAILURE);
     }
 
@@ -444,11 +453,15 @@ int main(int argc, char *argv[])
     signal(SIGINT, handle_terminate_signal);
     signal(SIGTERM, handle_terminate_signal);
 
-    if (ldr_init(&ldr, ldr_gpio, buf_size, high_threshold, low_threshold)) {
+    if (ldr_init(&ldr, ldr_gpio)) {
         LOG_ERROR("Error: Failed to initialize LDR GPIO pin\n");
         ret = -1;
         goto clean_up;
     }
+    ldr_configure(&ldr, high_threshold, low_threshold,
+                  complete_darkness_threshold, high_threshold_duration_ms,
+                  low_threshold_duration_ms, complete_darkness_duration_ms);
+
 
     ldr_register_callback(&ldr, ldr_trigger_cb, &action);
 

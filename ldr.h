@@ -18,6 +18,15 @@
 #ifndef _LDR_H_
 #define _LDR_H_
 
+#include <time.h>
+
+#define LDR_DEFAULT_HIGH_THRESHOLD                  150
+#define LDR_DEFAULT_LOW_THRESHOLD                   30
+#define LDR_DEFAULT_COMPLETE_DARKNESS_THRESHOLD     900
+#define LDR_DEFAULT_HIGH_DURATION_MS                60000
+#define LDR_DEFAULT_LOW_DURATION_MS                 300000
+#define LDR_DEFAULT_COMPLETE_DARKNESS_DURATION_MS   900
+
 
 typedef enum
 {
@@ -36,23 +45,29 @@ struct ldr_sensor_t
     int fd_gpio_edge;
     int fd_gpio_value;
 
-    int buf_index;
-    unsigned int buf_size;
-    unsigned int *buf;
-    unsigned int running_total;
-    unsigned int running_avg;
+    struct timespec cross_threshold_start_time;
 
     ldr_state_t state;
     unsigned int high_threshold;
     unsigned int low_threshold;
+    unsigned int complete_darkness_threshold;
+    unsigned int high_threshold_duration_ms;
+    unsigned int low_threshold_duration_ms;
+    unsigned int complete_darkness_duration_ms;
 
     LDRTriggerCallback trigger_cb;
     void *priv_data;
 };
 
 
-int ldr_init(struct ldr_sensor_t *ldr, int ldr_gpio, unsigned int buf_size,
-             unsigned int high_threshold, unsigned int low_threshold);
+int ldr_init(struct ldr_sensor_t *ldr, int ldr_gpio);
+void ldr_configure(struct ldr_sensor_t *ldr,
+                   unsigned int high_threshold,
+                   unsigned int low_threshold,
+                   unsigned int complete_darkness_threshold,
+                   unsigned int high_threshold_duration_ms,
+                   unsigned int low_threshold_duration_ms,
+                   unsigned int complete_darkness_duration_ms);
 void ldr_register_callback(struct ldr_sensor_t *ldr,
                            LDRTriggerCallback cb, void *priv_data);
 int ldr_read_once(struct ldr_sensor_t *ldr);

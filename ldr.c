@@ -15,7 +15,6 @@
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <stdlib.h>
-#include <time.h>
 #include <unistd.h>
 #include <string.h>
 
@@ -26,10 +25,6 @@
 
 void ldr_cleanup(struct ldr_sensor_t *ldr)
 {
-    if (ldr->buf) {
-        free(ldr->buf);
-        ldr->buf = NULL;
-    }
     if (ldr->fd_gpio_direction >= 0) {
         close(ldr->fd_gpio_direction);
         ldr->fd_gpio_direction = -1;
@@ -49,8 +44,7 @@ void ldr_cleanup(struct ldr_sensor_t *ldr)
 }
 
 
-int ldr_init(struct ldr_sensor_t *ldr, int ldr_gpio, unsigned int buf_size,
-             unsigned int high_threshold, unsigned int low_threshold)
+int ldr_init(struct ldr_sensor_t *ldr, int ldr_gpio)
 {
     memset(ldr, 0, sizeof(struct ldr_sensor_t));
     ldr->gpio = -1;
@@ -58,16 +52,13 @@ int ldr_init(struct ldr_sensor_t *ldr, int ldr_gpio, unsigned int buf_size,
     ldr->fd_gpio_edge = -1;
     ldr->fd_gpio_value = -1;
 
-    if (buf_size == 0)
-        return -1;
-    ldr->buf = malloc(sizeof(unsigned int) * buf_size);
-    if (ldr->buf == NULL)
-        return -1;
-    memset(ldr->buf, 0, sizeof(unsigned int) * buf_size);
-    ldr->buf_size = buf_size;
-
-    ldr->high_threshold = high_threshold;
-    ldr->low_threshold = low_threshold;
+    clock_gettime(CLOCK_MONOTONIC, &(ldr->cross_threshold_start_time));
+    ldr->high_threshold = LDR_DEFAULT_HIGH_THRESHOLD;
+    ldr->low_threshold = LDR_DEFAULT_LOW_THRESHOLD;
+    ldr->complete_darkness_threshold = LDR_DEFAULT_COMPLETE_DARKNESS_THRESHOLD;
+    ldr->high_threshold_duration_ms = LDR_DEFAULT_HIGH_DURATION_MS;
+    ldr->low_threshold_duration_ms = LDR_DEFAULT_LOW_DURATION_MS;
+    ldr->complete_darkness_duration_ms = LDR_DEFAULT_COMPLETE_DARKNESS_DURATION_MS;
 
     if (gpio_export(ldr_gpio)) {
         return -1;
@@ -86,6 +77,23 @@ int ldr_init(struct ldr_sensor_t *ldr, int ldr_gpio, unsigned int buf_size,
 }
 
 
+void ldr_configure(struct ldr_sensor_t *ldr,
+                   unsigned int high_threshold,
+                   unsigned int low_threshold,
+                   unsigned int complete_darkness_threshold,
+                   unsigned int high_threshold_duration_ms,
+                   unsigned int low_threshold_duration_ms,
+                   unsigned int complete_darkness_duration_ms)
+{
+    ldr->high_threshold = high_threshold;
+    ldr->low_threshold = low_threshold;
+    ldr->complete_darkness_threshold = complete_darkness_threshold;
+    ldr->high_threshold_duration_ms = high_threshold_duration_ms;
+    ldr->low_threshold_duration_ms = low_threshold_duration_ms;
+    ldr->complete_darkness_duration_ms = complete_darkness_duration_ms;
+}
+
+
 void ldr_register_callback(struct ldr_sensor_t *ldr,
                            LDRTriggerCallback cb, void *priv_data)
 {
@@ -95,34 +103,35 @@ void ldr_register_callback(struct ldr_sensor_t *ldr,
 }
 
 
-static void ldr_update_running_average(struct ldr_sensor_t *ldr,
-                                       int time_diff_ms)
+static void ldr_update_state(struct ldr_sensor_t *ldr, int ldr_duration_ms,
+                             struct timespec *now)
 {
-    ldr->running_total -= ldr->buf[ldr->buf_index];
-    ldr->buf[ldr->buf_index] = time_diff_ms;
-    ldr->running_total += ldr->buf[ldr->buf_index];
-    ldr->buf_index++;
-    if (ldr->buf_index >= ldr->buf_size)
-        ldr->buf_index = 0;
-    ldr->running_avg = ldr->running_total / ldr->buf_size;
-    
+    int time_diff_ms = (now->tv_sec - ldr->cross_threshold_start_time.tv_sec) * 1000 + (now->tv_nsec - ldr->cross_threshold_start_time.tv_nsec) / 1000000;
     if (ldr->state == LDR_BRIGHT) {
-        if (ldr->running_avg > ldr->high_threshold) {
+        if (((ldr_duration_ms >= ldr->complete_darkness_threshold) &&
+             (time_diff_ms >= ldr->complete_darkness_duration_ms)) ||
+            ((ldr_duration_ms >= ldr->high_threshold) &&
+             (time_diff_ms >= ldr->high_threshold_duration_ms))) {
             ldr->state = LDR_DARK;
+            memcpy(&(ldr->cross_threshold_start_time), now, sizeof(struct timespec));
             if (ldr->trigger_cb)
                 ldr->trigger_cb(ldr->priv_data, ldr->state);
         }
     } else if (ldr->state == LDR_DARK) {
-        if (ldr->running_avg < ldr->low_threshold) {
+        if ((ldr_duration_ms < ldr->low_threshold) &&
+            (time_diff_ms >= ldr->low_threshold_duration_ms)) {
             ldr->state = LDR_BRIGHT;
+            memcpy(&(ldr->cross_threshold_start_time), now, sizeof(struct timespec));
             if (ldr->trigger_cb)
                 ldr->trigger_cb(ldr->priv_data, ldr->state);
         }
     } else {
-        if (time_diff_ms < (ldr->high_threshold + ldr->low_threshold)/2)
-            ldr->state = LDR_BRIGHT;
-        else
+        if ((ldr_duration_ms >= ldr->complete_darkness_threshold) ||
+            (ldr_duration_ms >= (ldr->high_threshold + ldr->low_threshold)/2))
             ldr->state = LDR_DARK;
+        else
+            ldr->state = LDR_BRIGHT;
+        memcpy(&(ldr->cross_threshold_start_time), now, sizeof(struct timespec));
         if (ldr->trigger_cb)
             ldr->trigger_cb(ldr->priv_data, ldr->state);
     }
@@ -152,8 +161,8 @@ int ldr_read_once(struct ldr_sensor_t *ldr)
     clock_gettime(CLOCK_MONOTONIC, &now);
     if (poll_ret >= 0) {
         time_diff_ms = (now.tv_sec - start_time.tv_sec) * 1000 + (now.tv_nsec - start_time.tv_nsec) / 1000000;
-        ldr_update_running_average(ldr, time_diff_ms);
-        LOG_VERBOSE("%d ms, avg %d ms\n", time_diff_ms, ldr->running_avg);
+        ldr_update_state(ldr, time_diff_ms, &now);
+        LOG_VERBOSE("%d ms\n", time_diff_ms);
     }
     // reset the edge back to none
     ret |= gpio_write_string(ldr->fd_gpio_edge, "none\n", "edge");
