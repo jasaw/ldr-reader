@@ -21,6 +21,8 @@
 #include <getopt.h>
 #include <string.h>
 #include <wordexp.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "utils.h"
 #include "list.h"
@@ -436,15 +438,45 @@ int main(int argc, char *argv[])
             exit(EXIT_SUCCESS);
 
         // we are now in child process
-
-        // Change the file mode mask
-        //umask(0);
-
-        // Create a new SID for the child process
+        // Start a new session for the daemon
         sid = setsid();
         if (sid < 0)
         {
             LOG_ERROR("Error: set SID failed\n");
+            exit(EXIT_FAILURE);
+        }
+        // Fork again, allowing the parent process to terminate.
+        signal(SIGHUP, SIG_IGN);
+        pid = fork();
+        if (pid < 0)
+        {
+            LOG_ERROR("Error: fork failed\n");
+            exit(EXIT_FAILURE);
+        }
+        // If we got a good PID, then we can exit the parent process.
+        if (pid > 0)
+            exit(EXIT_SUCCESS);
+
+        // Set the current working directory to the root directory.
+        if (chdir("/") == -1) {
+            LOG_ERROR("Error: failed to change working directory\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Change the file mode mask
+        umask(0);
+
+        // Close then reopen standard file descriptors.
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
+        if (open("/dev/null", O_RDONLY) == -1) {
+            exit(EXIT_FAILURE);
+        }
+        if (open("/dev/null", O_WRONLY) == -1) {
+            exit(EXIT_FAILURE);
+        }
+        if (open("/dev/null", O_RDWR) == -1) {
             exit(EXIT_FAILURE);
         }
     }
