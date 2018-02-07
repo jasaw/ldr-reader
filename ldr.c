@@ -108,23 +108,27 @@ static void ldr_update_state(struct ldr_sensor_t *ldr, int ldr_duration_ms,
 {
     int time_diff_ms = (now->tv_sec - ldr->cross_threshold_start_time.tv_sec) * 1000 + (now->tv_nsec - ldr->cross_threshold_start_time.tv_nsec) / 1000000;
     if (ldr->state == LDR_BRIGHT) {
-        if (((ldr_duration_ms >= ldr->complete_darkness_threshold) &&
-             (time_diff_ms >= ldr->complete_darkness_duration_ms)) ||
-            ((ldr_duration_ms >= ldr->high_threshold) &&
-             (time_diff_ms >= ldr->high_threshold_duration_ms))) {
-            ldr->state = LDR_DARK;
+        if (ldr_duration_ms >= ldr->high_threshold) {
+            if (((ldr_duration_ms >= ldr->complete_darkness_threshold) &&
+                 (time_diff_ms >= ldr->complete_darkness_duration_ms)) ||
+                (time_diff_ms >= ldr->high_threshold_duration_ms)) {
+                ldr->state = LDR_DARK;
+                memcpy(&(ldr->cross_threshold_start_time), now, sizeof(struct timespec));
+                if (ldr->trigger_cb)
+                    ldr->trigger_cb(ldr->priv_data, ldr->state);
+            }
+        } else
             memcpy(&(ldr->cross_threshold_start_time), now, sizeof(struct timespec));
-            if (ldr->trigger_cb)
-                ldr->trigger_cb(ldr->priv_data, ldr->state);
-        }
     } else if (ldr->state == LDR_DARK) {
-        if ((ldr_duration_ms < ldr->low_threshold) &&
-            (time_diff_ms >= ldr->low_threshold_duration_ms)) {
-            ldr->state = LDR_BRIGHT;
+        if (ldr_duration_ms < ldr->low_threshold) {
+            if (time_diff_ms >= ldr->low_threshold_duration_ms) {
+                ldr->state = LDR_BRIGHT;
+                memcpy(&(ldr->cross_threshold_start_time), now, sizeof(struct timespec));
+                if (ldr->trigger_cb)
+                    ldr->trigger_cb(ldr->priv_data, ldr->state);
+            }
+        } else
             memcpy(&(ldr->cross_threshold_start_time), now, sizeof(struct timespec));
-            if (ldr->trigger_cb)
-                ldr->trigger_cb(ldr->priv_data, ldr->state);
-        }
     } else {
         if ((ldr_duration_ms >= ldr->complete_darkness_threshold) ||
             (ldr_duration_ms >= (ldr->high_threshold + ldr->low_threshold)/2))
@@ -142,7 +146,7 @@ int ldr_read_once(struct ldr_sensor_t *ldr)
 {
     struct timespec start_time;
     struct timespec now;
-    int time_diff_ms;
+    int time_diff_ms = 0;
     int poll_ret;
     int ret = 0;
 
@@ -150,6 +154,9 @@ int ldr_read_once(struct ldr_sensor_t *ldr)
     ret |= gpio_write_string(ldr->fd_gpio_direction, "out\n", "direction");
     ret |= gpio_write_string(ldr->fd_gpio_value, "0\n", "value");
     udelay(100000);
+    // no need to read too quickly, add additional delay
+    if (time_diff_ms < 250)
+        udelay((250 - time_diff_ms)*1000);
     // change to input to let capacitor charge
     ret |= gpio_write_string(ldr->fd_gpio_direction, "in\n", "direction");
     ret |= gpio_write_string(ldr->fd_gpio_edge, "rising\n", "edge");
