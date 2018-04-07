@@ -2,7 +2,7 @@
 
 Light Dependent Resistor (CdS) reader
 
-[Typical circuit](circuit.png)
+![Typical circuit](circuit.png)
 
 Above circuit diagram is a low cost way of detecting ambient light using a GPIO pin. It works by setting the GPIO pin to output to drain the capacitor, then set the GPIO to input to let the capacitor charge. The amount of time needed to charge the capacitor is determined by the resistance of the CdS sensor.
 
