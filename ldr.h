@@ -20,12 +20,12 @@
 
 #include <time.h>
 
-#define LDR_DEFAULT_HIGH_THRESHOLD                  150
-#define LDR_DEFAULT_LOW_THRESHOLD                   30
-#define LDR_DEFAULT_COMPLETE_DARKNESS_THRESHOLD     900
+#define LDR_DEFAULT_HIGH_THRESHOLD                  100
+#define LDR_DEFAULT_LOW_THRESHOLD                   25
+#define LDR_DEFAULT_COMPLETE_DARKNESS_THRESHOLD     750
 #define LDR_DEFAULT_HIGH_DURATION_MS                60000
 #define LDR_DEFAULT_LOW_DURATION_MS                 300000
-#define LDR_DEFAULT_COMPLETE_DARKNESS_DURATION_MS   900
+#define LDR_DEFAULT_COMPLETE_DARKNESS_DURATION_MS   750
 
 
 typedef enum
@@ -54,6 +54,8 @@ struct ldr_sensor_t
     unsigned int high_threshold_duration_ms;
     unsigned int low_threshold_duration_ms;
     unsigned int complete_darkness_duration_ms;
+
+    int fd_raw_value_log_file;
 
     LDRTriggerCallback trigger_cb;
     void *priv_data;

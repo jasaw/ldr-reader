@@ -51,6 +51,7 @@ int ldr_init(struct ldr_sensor_t *ldr, int ldr_gpio)
     ldr->fd_gpio_direction = -1;
     ldr->fd_gpio_edge = -1;
     ldr->fd_gpio_value = -1;
+    ldr->fd_raw_value_log_file = -1;
 
     clock_gettime(CLOCK_MONOTONIC, &(ldr->cross_threshold_start_time));
     ldr->high_threshold = LDR_DEFAULT_HIGH_THRESHOLD;
@@ -139,6 +140,13 @@ static void ldr_update_state(struct ldr_sensor_t *ldr, int ldr_duration_ms,
         if (ldr->trigger_cb)
             ldr->trigger_cb(ldr->priv_data, ldr->state);
     }
+    if (ldr->fd_raw_value_log_file >= 0) {
+        char rawbuf[3];
+        rawbuf[2] = (char)(ldr->state);
+        rawbuf[1] = (char)((ldr_duration_ms >> 8) & 0xFF);
+        rawbuf[0] = (char)(ldr_duration_ms & 0xFF);
+        write(ldr->fd_raw_value_log_file, rawbuf, sizeof(rawbuf));
+    }
 }
 
 
@@ -164,7 +172,7 @@ int ldr_read_once(struct ldr_sensor_t *ldr)
         return ret;
     // time the interrupt
     clock_gettime(CLOCK_MONOTONIC, &start_time);
-    poll_ret = gpio_wait_for_interrupt_fd(ldr->fd_gpio_value, 1000);
+    poll_ret = gpio_wait_for_interrupt_fd(ldr->fd_gpio_value, 400);
     clock_gettime(CLOCK_MONOTONIC, &now);
     if (poll_ret >= 0) {
         time_diff_ms = (now.tv_sec - start_time.tv_sec) * 1000 + (now.tv_nsec - start_time.tv_nsec) / 1000000;

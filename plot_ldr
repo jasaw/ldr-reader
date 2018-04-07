@@ -1,0 +1,131 @@
+#!/usr/bin/python
+""" Plots LDR raw output """
+
+import os
+current_dir = os.path.dirname(os.path.realpath(__file__))
+import sys
+import getopt
+import datetime
+
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+#mpl.rcParams['examples.directory'] = current_dir
+
+
+
+
+
+def print_usage(prog_cmd):
+    print "Usage: %s [options]" % prog_cmd
+    print "Options:"
+    print "-i <file>    --input <file>      Raw LDR data file."
+    print "-h           --help              Print this help page."
+
+
+def run():
+    inputfile = None
+
+    try:
+        (opts, args) = getopt.getopt(sys.argv[1:], "hi:", ["help", "input="])
+    except getopt.error, why:
+        print "Error: getopt error: %s" % (why)
+        print_usage(sys.argv[0])
+        sys.exit(-1)
+
+    try:
+        for opt in opts:
+            if opt[0] == "-h" or opt[0] == "--help":
+                print_usage(sys.argv[0])
+                sys.exit(1)
+            if opt[0] == "-i" or opt[0] == "--input":
+                inputfile = opt[1]
+                continue
+            print_usage(sys.argv[0])
+            sys.exit(-1)
+    except ValueError, why:
+        print "Error: bad parameter \"%s\" for option %s: %s" % (opt[1], opt[0], why)
+        print_usage(sys.argv[0])
+        sys.exit(-1)
+
+    if inputfile is None:
+        print "Error: input data file not defined."
+        sys.exit(-1)
+
+    if not os.path.isfile(inputfile):
+        print "Error: input data file \"%s\" not found." % inputfile
+        sys.exit(-1)
+
+
+    dt = np.dtype([('value', np.uint16), ('state', np.uint8)])
+    ldr_data = np.fromfile(inputfile, dt)
+    #print(ldr_data)
+    ldr_value, ldr_state = zip(*ldr_data)
+    ldr_state = map(lambda x: x*150, ldr_state)
+    sample_index = range(len(ldr_data))
+    #print(ldr_value)
+    #print(ldr_state)
+
+
+
+    fig = plt.figure()
+
+    ## plot LDR value
+    #ax = fig.add_subplot(2, 1, 1)
+    #ax.set_title('LDR Value')
+    #ax.set_ylabel('ms')
+    #ax.set_xlabel('index')
+    #plegend = []
+    #slegend = []
+    #ptmp, = ax.plot(sample_index, ldr_value, 'b')
+    #plegend.append(ptmp)
+    #slegend.append('Value')
+    #ax.legend(plegend, slegend)
+    #ax.xaxis.grid(True, which='major')
+    #ax.yaxis.grid(True, which='major')
+    #plt.setp(plt.xticks()[1], rotation=30, ha='right')
+    #
+    ## plot LDR state
+    #ax = fig.add_subplot(2, 1, 2)
+    #ax.set_title('LDR State')
+    #ax.set_ylabel('state')
+    #ax.set_xlabel('index')
+    #plegend = []
+    #slegend = []
+    #ptmp, = ax.plot(sample_index, ldr_state, 'g')
+    #plegend.append(ptmp)
+    #slegend.append('State')
+    #ax.legend(plegend, slegend)
+    #ax.xaxis.grid(True, which='major')
+    #ax.yaxis.grid(True, which='major')
+    #plt.setp(plt.xticks()[1], rotation=30, ha='right')
+
+    # plot LDR value and state together
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_title('LDR log')
+    ax.set_ylabel('ms')
+    ax.set_xlabel('index')
+    plegend = []
+    slegend = []
+    ptmp, = ax.plot(sample_index, ldr_value, 'b')
+    plegend.append(ptmp)
+    slegend.append('Value')
+    ptmp, = ax.plot(sample_index, ldr_state, 'g')
+    plegend.append(ptmp)
+    slegend.append('State')
+    ax.legend(plegend, slegend)
+    ax.xaxis.grid(True, which='major')
+    ax.yaxis.grid(True, which='major')
+    plt.setp(plt.xticks()[1], rotation=30, ha='right')
+
+    plt.show()
+
+
+
+
+
+
+if __name__ == "__main__":
+    run()

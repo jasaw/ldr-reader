@@ -226,6 +226,7 @@ static void syntax(const char *progname)
     fprintf(stderr, " -d [duration]   Low threshold debounce duration in seconds. Default %d\n", LDR_DEFAULT_LOW_DURATION_MS/1000);
     fprintf(stderr, " -X [command]    Command to run when dark\n");
     fprintf(stderr, " -x [command]    Command to run when bright\n");
+    fprintf(stderr, " -r [filepath]   Log raw values to file for debugging. Example: /var/log/ldr_raw.log\n");
     fprintf(stderr, " -b              Run in the background\n");
     fprintf(stderr, " -v              Increase verbose mode (can set multiple times)\n");
     fprintf(stderr, " -h              Display this help page\n");
@@ -241,6 +242,8 @@ int main(int argc, char *argv[])
     unsigned char daemonize = 0;
     struct ldr_sensor_t ldr;
     int ldr_gpio = -1;
+    const char *raw_value_log_file = "";
+    int fd_raw_value_log_file = -1;
     unsigned int high_threshold = LDR_DEFAULT_HIGH_THRESHOLD;
     unsigned int low_threshold = LDR_DEFAULT_LOW_THRESHOLD;
     unsigned int complete_darkness_threshold = LDR_DEFAULT_COMPLETE_DARKNESS_THRESHOLD;
@@ -257,7 +260,7 @@ int main(int argc, char *argv[])
 
     progname = argv[0];
 
-    while (((opt = getopt(argc, argv, "g:G:H:L:D:d:n:x:X:bvh")) != -1))
+    while (((opt = getopt(argc, argv, "g:G:H:L:D:d:n:x:X:r:bvh")) != -1))
     {
         switch (opt)
         {
@@ -389,6 +392,9 @@ int main(int argc, char *argv[])
                         exit(EXIT_FAILURE);
                 }
                 break;
+            case 'r':
+                raw_value_log_file = optarg;
+                break;
             case 'b': daemonize = 1; break;
             case 'v': new_log_level++; set_log_level(new_log_level); break;
             case 'h': // fall through
@@ -422,6 +428,7 @@ int main(int argc, char *argv[])
         LOG_ERROR("Error: complete darkness threshold must be greater than high threshold\n");
         exit(EXIT_FAILURE);
     }
+
 
 
     if (daemonize)
@@ -490,6 +497,15 @@ int main(int argc, char *argv[])
         ret = -1;
         goto clean_up;
     }
+    if (strlen(raw_value_log_file) > 0) {
+        fd_raw_value_log_file = open(raw_value_log_file, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        if (fd_raw_value_log_file < 0) {
+            LOG_ERROR("Error: Failed to open %s for logging\n", raw_value_log_file);
+            ret = -1;
+            goto clean_up;
+        }
+        ldr.fd_raw_value_log_file = fd_raw_value_log_file;
+    }
     ldr_configure(&ldr, high_threshold, low_threshold,
                   complete_darkness_threshold, high_threshold_duration_ms,
                   low_threshold_duration_ms, complete_darkness_duration_ms);
@@ -514,6 +530,10 @@ int main(int argc, char *argv[])
 clean_up:
     trigger_action_cleanup(&action);
     ldr_cleanup(&ldr);
+    if (fd_raw_value_log_file >= 0) {
+        close(fd_raw_value_log_file);
+        fd_raw_value_log_file = -1;
+    }
 
     exit(ret);
 }
