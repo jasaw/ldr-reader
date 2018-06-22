@@ -286,7 +286,7 @@ int main(int argc, char *argv[])
                     if (gpio_str_len > 0) {
                         if (gpio_str[gpio_str_len-1] == 'i') {
                             inverted = 1;
-                            gpio_str[gpio_str_len-1] = 0;
+                            //gpio_str[gpio_str_len-1] = 0;
                         }
                     }
                     int output_gpio = atoi(gpio_str);
